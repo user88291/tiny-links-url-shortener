@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>TinyLinks — Local URL Shortener</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:#fff;padding:20px;border-radius:10px;max-width:720px;width:96%;box-shadow:0 6px 20px rgba(2,6,23,.08)}
+    h1{margin:0 0 8px;font-size:1.2rem}
+    p{margin:0 0 12px;color:#4b5563}
+    label{display:block;margin:8px 0;font-weight:600}
+    input[type=text]{width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px}
+    .row{display:flex;gap:8px;margin-top:8px}
+    button{padding:10px 12px;border:0;border-radius:8px;background:#0b69ff;color:#fff;cursor:pointer}
+    .list{margin-top:14px}
+    .item{display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;border:1px solid #eef2f7;margin-bottom:8px}
+    .muted{color:#6b7280;font-size:.9rem}
+    a.code{font-weight:700;color:#0b69ff;text-decoration:none}
+    .small{font-size:.85rem;color:#6b7280;margin-top:8px}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>TinyLinks</h1>
+    <p>Create short, shareable links locally (stored in your browser).</p>
+
+    <label>Original URL</label>
+    <input id="url" type="text" placeholder="https://example.com/path" />
+
+    <label>Short code (optional)</label>
+    <input id="code" type="text" placeholder="leave blank to auto-generate" />
+
+    <div class="row">
+      <button id="create">Create short link</button>
+      <button id="export" type="button">Export JSON</button>
+      <button id="importBtn" type="button">Import JSON</button>
+    </div>
+
+    <p class="small">To share, copy the generated link or send the page URL with ?t=CODE appended (example: index.html?t=abc123).</p>
+
+    <div id="status" class="muted small"></div>
+
+    <div class="list" id="list"></div>
+  </main>
+
+  <input id="fileInput" type="file" accept=".json" style="display:none"/>
+
+  <script>
+    const urlEl = document.getElementById('url');
+    const codeEl = document.getElementById('code');
+    const createBtn = document.getElementById('create');
+    const listEl = document.getElementById('list');
+    const status = document.getElementById('status');
+    const exportBtn = document.getElementById('export');
+    const importBtn = document.getElementById('importBtn');
+    const fileInput = document.getElementById('fileInput');
+
+    const STORAGE_KEY = 'tinylinks:v1';
+
+    function loadStore() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+      catch(e){ return {}; }
+    }
+    function saveStore(s){ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+
+    function randCode(n=6){
+      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let s=''; for(let i=0;i<n;i++) s += chars[Math.floor(Math.random()*chars.length)];
+      return s;
+    }
+
+    function render(){
+      const s = loadStore();
+      listEl.innerHTML = '';
+      const keys = Object.keys(s).sort((a,b)=> (s[b].created||0)-(s[a].created||0));
+      if(!keys.length) { listEl.innerHTML = '<div class="muted">No links yet.</div>'; return; }
+      keys.forEach(k=>{
+        const item = document.createElement('div');
+        item.className = 'item';
+        const left = document.createElement('div');
+        left.innerHTML = `<div><a class="code" href="${linkFor(k)}" target="_blank" rel="noopener">${location.origin + location.pathname}?t=${encodeURIComponent(k)}</a></div><div class="muted">${s[k].url}</div>`;
+        const right = document.createElement('div');
+        right.innerHTML = `<button data-copy="${k}">Copy</button> <button data-delete="${k}">Delete</button>`;
+        item.appendChild(left); item.appendChild(right);
+        listEl.appendChild(item);
+      });
+      listEl.querySelectorAll('button[data-copy]').forEach(b=>{
+        b.addEventListener('click', ()=> {
+          const k = b.getAttribute('data-copy');
+          navigator.clipboard.writeText(location.origin + location.pathname + '?t=' + encodeURIComponent(k));
+          status.textContent = 'Copied to clipboard';
+          setTimeout(()=>status.textContent='','1500');
+        });
+      });
+      listEl.querySelectorAll('button[data-delete]').forEach(b=>{
+        b.addEventListener('click', ()=> {
+          const k = b.getAttribute('data-delete');
+          const s = loadStore(); delete s[k]; saveStore(s); render();
+        });
+      });
+    }
+
+    function linkFor(code){ return location.origin + location.pathname + '?t=' + encodeURIComponent(code); }
+
+    createBtn.addEventListener('click', ()=>{
+      const url = urlEl.value.trim();
+      if(!url) { status.textContent = 'Enter a URL'; return; }
+      let code = codeEl.value.trim();
+      const s = loadStore();
+      if(!code) {
+        do { code = randCode(6); } while(s[code]);
+      } else {
+        if(s[code]) { status.textContent = 'Code already exists — choose another'; return; }
+      }
+      s[code] = { url, created: Date.now() };
+      saveStore(s); render();
+      status.textContent = 'Short link created';
+      codeEl.value=''; urlEl.value='';
+      setTimeout(()=>status.textContent='','1500');
+    });
+
+    exportBtn.addEventListener('click', ()=>{
+      const s = loadStore();
+      const blob = new Blob([JSON.stringify(s, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'tinylinks.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    importBtn.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', ()=>{
+      const f = fileInput.files[0];
+      if(!f) return;
+      const r = new FileReader();
+      r.onload = ()=> {
+        try {
+          const obj = JSON.parse(r.result);
+          if(typeof obj !== 'object') throw new Error('Invalid');
+          const s = loadStore();
+          Object.assign(s, obj);
+          saveStore(s); render();
+          status.textContent = 'Imported';
+          setTimeout(()=>status.textContent='','1500');
+        } catch(e){ status.textContent = 'Import failed'; }
+      };
+      r.readAsText(f);
+    });
+
+    // Handle redirect when ?t=code present
+    (function handleRedirect(){
+      const params = new URLSearchParams(location.search);
+      const t = params.get('t');
+      if(t) {
+        const s = loadStore();
+        const entry = s[t];
+        if(entry && entry.url) {
+          // open in same tab
+          location.href = entry.url;
+        } else {
+          // show message and render UI
+          status.textContent = 'Short code not found in this browser.';
+        }
+      }
+    })();
+
+    render();
+  </script>
+</body>
+</html>
